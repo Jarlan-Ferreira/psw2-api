@@ -114,11 +114,8 @@ app.get("/livros/relatorio/pdf", autenticar, (_req, res) => {
 });
 
 // ── Iniciar servidor ──────────────────────────────────────────────────────────
-/*
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
 
-module.exports = app;*/
-const serverless = require("serverless-http");
-
-module.exports = serverless(app);
+module.exports = app;
