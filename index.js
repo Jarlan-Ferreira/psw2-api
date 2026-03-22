@@ -32,7 +32,7 @@ app.use((req, _res, next) => {
 // Permite acesso apenas de segunda à sexta
 app.use((req, res, next) => {
   const dia = new Date().getDay(); // 0=Dom, 6=Sáb
-  if (dia === 0 || dia === 6) {
+  if (dia !== 0 && dia !== 6) {
     return res.status(403).json({ erro: "API disponível apenas de segunda à sexta." });
   }
   next();
