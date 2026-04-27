@@ -1,44 +1,81 @@
-const express = require("express");
-const jwt = require("jsonwebtoken");
+require("dotenv").config();
+const express    = require("express");
+const mongoose   = require("mongoose");
+const jwt        = require("jsonwebtoken");
+const bcrypt     = require("bcryptjs");
+const cors       = require("cors");
+const nodemailer = require("nodemailer");
+const cloudinary = require("cloudinary").v2;
+const multer     = require("multer");
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
 const PDFDocument = require("pdfkit");
 
+const Usuario = require("./models/Usuario");
+const Livro   = require("./models/Livro");
+
 const app = express();
+
+// ── G. CORS — apenas mesmo servidor ──────────────────────────────────────────
+app.use(cors({
+  origin: (origin, cb) => {
+    // Permite requisições sem origin (ex: Postman local) e do mesmo servidor
+    if (!origin || origin === `http://localhost:${process.env.PORT || 3000}`) {
+      cb(null, true);
+    } else {
+      cb(new Error("CORS: origem não permitida"));
+    }
+  },
+}));
+
 app.use(express.json());
+app.use(express.static("public"));
 
-const SECRET = "psw2_secret_key";
+const SECRET = process.env.JWT_SECRET || "psw2_secret_key";
 
-// ── Dados mockados ────────────────────────────────────────────────────────────
+// ── MongoDB ───────────────────────────────────────────────────────────────────
+if (process.env.MONGO_URI && !process.env.MONGO_URI.includes("<")) {
+  mongoose.connect(process.env.MONGO_URI)
+    .then(() => console.log("MongoDB conectado"))
+    .catch((e) => console.error("Erro MongoDB:", e.message));
+}
 
-const usuarios = [
-  { id: 1, email: "admin@email.com", senha: "123456" },
-];
+// ── Cloudinary ────────────────────────────────────────────────────────────────
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key:    process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
-const livros = [
-  { id: 1, titulo: "Clean Code", autor: "Robert C. Martin", ano: 2008 },
-  { id: 2, titulo: "The Pragmatic Programmer", autor: "Andrew Hunt", ano: 1999 },
-  { id: 3, titulo: "Design Patterns", autor: "Gang of Four", ano: 1994 },
-];
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: { folder: "psw2-livros", allowed_formats: ["jpg", "jpeg", "png"] },
+});
+const upload = multer({ storage });
 
-const logs = []; // { horario, rota }
+// ── Nodemailer ────────────────────────────────────────────────────────────────
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+});
 
-// ── Middlewares ───────────────────────────────────────────────────────────────
+// ── Logs em memória ───────────────────────────────────────────────────────────
+const logs = [];
 
-// Registra horário e rota de cada requisição
+// ── Middlewares globais ───────────────────────────────────────────────────────
+
 app.use((req, _res, next) => {
-  logs.push({ horario: new Date().toISOString(), rota: req.method + " " + req.path });
+  logs.push({ horario: new Date().toISOString(), rota: `${req.method} ${req.path}` });
   next();
 });
 
-// Permite acesso apenas de segunda à sexta
-app.use((req, res, next) => {
-  const dia = new Date().getDay(); // 0=Dom, 6=Sáb
-  if (dia !== 0 && dia !== 6) {
+/* app.use((req, res, next) => {
+  const dia = new Date().getDay();
+  if (dia === 0 || dia === 6) {
     return res.status(403).json({ erro: "API disponível apenas de segunda à sexta." });
   }
   next();
-});
+}); */
 
-// Verifica JWT
 function autenticar(req, res, next) {
   const auth = req.headers.authorization;
   if (!auth) return res.status(401).json({ erro: "Token não informado." });
@@ -50,72 +87,152 @@ function autenticar(req, res, next) {
   }
 }
 
-// ── Rotas ─────────────────────────────────────────────────────────────────────
-
-// A. Login
-app.post("/logar", (req, res) => {
+// ── Criar usuário ────────────────────────────────────────────────────────────
+app.post("/usuarios", async (req, res) => {
   const { email, senha } = req.body;
-  const usuario = usuarios.find((u) => u.email === email && u.senha === senha);
-  if (!usuario) return res.status(401).json({ erro: "Credenciais inválidas." });
-  const token = jwt.sign({ id: usuario.id, email: usuario.email }, SECRET, { expiresIn: "8h" });
+  if (!email || !senha) return res.status(400).json({ erro: "email e senha são obrigatórios." });
+  const existe = await Usuario.findOne({ email });
+  if (existe) return res.status(409).json({ erro: "E-mail já cadastrado." });
+  const usuario = await Usuario.create({ email, senha });
+  res.status(201).json({ mensagem: "Usuário criado.", email: usuario.email });
+});
+
+// ── H. 2FA — solicitar código ─────────────────────────────────────────────────
+app.post("/logar/solicitar-codigo", async (req, res) => {
+  const { email } = req.body;
+  const usuario = await Usuario.findOne({ email });
+  if (!usuario) return res.status(404).json({ erro: "Usuário não encontrado." });
+
+  const codigo = Math.floor(100000 + Math.random() * 900000).toString();
+  usuario.codigo2fa = codigo;
+  usuario.codigo2faExpira = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+  await usuario.save();
+
+  await transporter.sendMail({
+    from: process.env.EMAIL_USER,
+    to: email,
+    subject: "Código de verificação PSW2",
+    text: `Seu código: ${codigo} (válido por 10 minutos)`,
+  });
+
+  res.json({ mensagem: "Código enviado para o e-mail." });
+});
+
+// ── Login com 2FA ─────────────────────────────────────────────────────────────
+app.post("/logar", async (req, res) => {
+  const { email, senha, codigo } = req.body;
+  const usuario = await Usuario.findOne({ email });
+  if (!usuario || !(await usuario.verificarSenha(senha))) {
+    return res.status(401).json({ erro: "Credenciais inválidas." });
+  }
+
+  // Valida 2FA
+  if (!codigo) return res.status(400).json({ erro: "Informe o código 2FA enviado ao e-mail." });
+  if (usuario.codigo2fa !== codigo || new Date() > usuario.codigo2faExpira) {
+    return res.status(401).json({ erro: "Código 2FA inválido ou expirado." });
+  }
+
+  // Limpa código após uso
+  usuario.codigo2fa = null;
+  usuario.codigo2faExpira = null;
+  await usuario.save();
+
+  const token = jwt.sign({ id: usuario._id, email: usuario.email }, SECRET, { expiresIn: "8h" });
   res.json({ token });
 });
 
-// B. Listar livros
-app.get("/livros", autenticar, (_req, res) => {
+// ── Livros ────────────────────────────────────────────────────────────────────
+
+// Listar
+app.get("/livros", autenticar, async (_req, res) => {
+  const livros = await Livro.find();
   res.json(livros);
 });
 
-// C. Inserir livro
-app.post("/livros", autenticar, (req, res) => {
-  const { titulo, autor, ano } = req.body;
-  if (!titulo || !autor || !ano) return res.status(400).json({ erro: "titulo, autor e ano são obrigatórios." });
-  const novoLivro = { id: livros.length + 1, titulo, autor, ano };
-  livros.push(novoLivro);
-  res.status(201).json(novoLivro);
-});
-
-// D. Excluir livro
-app.delete("/livros/:id", autenticar, (req, res) => {
-  const idx = livros.findIndex((l) => l.id === Number(req.params.id));
-  if (idx === -1) return res.status(404).json({ erro: "Livro não encontrado." });
-  const [removido] = livros.splice(idx, 1);
-  res.json({ mensagem: "Livro removido.", livro: removido });
-});
-
-// F. Buscar livro por ID
-app.get("/livros/:id", autenticar, (req, res) => {
-  const livro = livros.find((l) => l.id === Number(req.params.id));
+// Buscar por ID
+app.get("/livros/:id", autenticar, async (req, res) => {
+  const livro = await Livro.findById(req.params.id).catch(() => null);
   if (!livro) return res.status(404).json({ erro: "Livro não encontrado." });
   res.json(livro);
 });
 
-// F. Logs por data (ex: GET /logs?data=2025-03-10)
+// Inserir (B. com upload de imagem para Cloudinary)
+app.post("/livros", autenticar, upload.single("imagem"), async (req, res) => {
+  const { titulo, autor, ano } = req.body;
+  if (!titulo || !autor || !ano) {
+    return res.status(400).json({ erro: "titulo, autor e ano são obrigatórios." });
+  }
+  const livro = await Livro.create({
+    titulo, autor, ano: Number(ano),
+    imagemUrl: req.file?.path || null,
+  });
+  res.status(201).json(livro);
+});
+
+// C. Atualizar (PUT)
+app.put("/livros/:id", autenticar, upload.single("imagem"), async (req, res) => {
+  const { titulo, autor, ano } = req.body;
+  const update = {};
+  if (titulo) update.titulo = titulo;
+  if (autor)  update.autor  = autor;
+  if (ano)    update.ano    = Number(ano);
+  if (req.file) update.imagemUrl = req.file.path;
+
+  const livro = await Livro.findByIdAndUpdate(req.params.id, update, { new: true }).catch(() => null);
+  if (!livro) return res.status(404).json({ erro: "Livro não encontrado." });
+  res.json(livro);
+});
+
+// Excluir
+app.delete("/livros/:id", autenticar, async (req, res) => {
+  const livro = await Livro.findByIdAndDelete(req.params.id).catch(() => null);
+  if (!livro) return res.status(404).json({ erro: "Livro não encontrado." });
+  res.json({ mensagem: "Livro removido.", livro });
+});
+
+// ── I. Distância entre dois pontos (Haversine) ────────────────────────────────
+// GET /distancia?lat1=&lon1=&lat2=&lon2=
+app.get("/distancia", autenticar, (req, res) => {
+  const { lat1, lon1, lat2, lon2 } = req.query;
+  if ([lat1, lon1, lat2, lon2].some((v) => v === undefined)) {
+    return res.status(400).json({ erro: "Informe lat1, lon1, lat2, lon2." });
+  }
+  const R = 6371; // km
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  const distancia = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  res.json({ distanciaKm: distancia.toFixed(2) });
+});
+
+// ── Logs ──────────────────────────────────────────────────────────────────────
 app.get("/logs", autenticar, (req, res) => {
   const { data } = req.query;
   if (!data) return res.status(400).json({ erro: "Informe o parâmetro 'data' (YYYY-MM-DD)." });
-  const filtrados = logs.filter((l) => l.horario.startsWith(data));
-  res.json(filtrados);
+  res.json(logs.filter((l) => l.horario.startsWith(data)));
 });
 
-// G. PDF com lista de livros
-app.get("/livros/relatorio/pdf", autenticar, (_req, res) => {
+// ── PDF ───────────────────────────────────────────────────────────────────────
+app.get("/livros/relatorio/pdf", autenticar, async (_req, res) => {
+  const livros = await Livro.find();
   const doc = new PDFDocument({ margin: 40 });
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", "attachment; filename=livros.pdf");
   doc.pipe(res);
-
   doc.fontSize(18).text("Lista de Livros", { align: "center" }).moveDown();
   livros.forEach((l) => {
-    doc.fontSize(12).text(`[${l.id}] ${l.titulo} — ${l.autor} (${l.ano})`);
+    doc.fontSize(12).text(`${l.titulo} — ${l.autor} (${l.ano})`);
   });
-
   doc.end();
 });
 
-// ── Iniciar servidor ──────────────────────────────────────────────────────────
-
+// ── Iniciar ───────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+if (require.main === module) {
+  app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+}
 
 module.exports = app;

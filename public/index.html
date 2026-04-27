@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>PSW2 API — Biblioteca</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #1e293b;
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #334155;
+    }
+
+    header h1 { font-size: 1.2rem; color: #38bdf8; }
+
+    #status-badge {
+      font-size: 0.75rem;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #334155;
+      color: #94a3b8;
+    }
+    #status-badge.ok  { background: #14532d; color: #4ade80; }
+    #status-badge.err { background: #7f1d1d; color: #f87171; }
+
+    main { max-width: 960px; margin: 32px auto; padding: 0 16px; }
+
+    /* ── Cards ── */
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+    .card h2 { font-size: 1rem; color: #38bdf8; margin-bottom: 16px; }
+
+    /* ── Formulários ── */
+    .form-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+
+    input, select {
+      flex: 1;
+      min-width: 140px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: #e2e8f0;
+      font-size: 0.9rem;
+    }
+    input:focus { outline: none; border-color: #38bdf8; }
+
+    button {
+      padding: 8px 18px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      transition: opacity .15s;
+    }
+    button:hover { opacity: .85; }
+
+    .btn-primary  { background: #0ea5e9; color: #fff; }
+    .btn-success  { background: #22c55e; color: #fff; }
+    .btn-danger   { background: #ef4444; color: #fff; }
+    .btn-warning  { background: #f59e0b; color: #fff; }
+    .btn-sm { padding: 4px 10px; font-size: 0.78rem; }
+
+    /* ── Tabela ── */
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    th { text-align: left; padding: 8px 10px; color: #94a3b8; border-bottom: 1px solid #334155; }
+    td { padding: 8px 10px; border-bottom: 1px solid #1e293b; vertical-align: middle; }
+    tr:hover td { background: #0f172a; }
+
+    .tag-ano {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 2px 8px;
+      font-size: 0.78rem;
+      color: #94a3b8;
+    }
+
+    img.capa { width: 40px; height: 52px; object-fit: cover; border-radius: 4px; }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed;
+      bottom: 24px; right: 24px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 12px 20px;
+      font-size: 0.85rem;
+      opacity: 0;
+      transition: opacity .3s;
+      max-width: 320px;
+      z-index: 999;
+    }
+    #toast.show { opacity: 1; }
+    #toast.ok  { border-color: #22c55e; color: #4ade80; }
+    #toast.err { border-color: #ef4444; color: #f87171; }
+
+    /* ── Resultado distância ── */
+    #resultado-distancia {
+      margin-top: 12px;
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #38bdf8;
+      text-align: center;
+    }
+
+    /* ── Login overlay ── */
+    #overlay {
+      position: fixed; inset: 0;
+      background: #0f172a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    #login-box {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 16px;
+      padding: 36px;
+      width: 100%;
+      max-width: 380px;
+    }
+    #login-box h2 { color: #38bdf8; margin-bottom: 20px; text-align: center; }
+    #login-box input { width: 100%; margin-bottom: 10px; display: block; }
+    #login-box button { width: 100%; margin-top: 6px; padding: 10px; }
+    #login-msg { font-size: 0.82rem; color: #f87171; margin-top: 8px; text-align: center; min-height: 18px; }
+
+    #step2 { display: none; }
+    #step-cadastro { display: none; }
+    #login-box .link { background: none; border: none; color: #38bdf8; font-size: 0.82rem; cursor: pointer; text-decoration: underline; margin-top: 10px; display: block; text-align: center; }
+  </style>
+</head>
+<body>
+
+<!-- ── Login overlay ── -->
+<div id="overlay">
+  <div id="login-box">
+    <h2>📚 PSW2 Biblioteca</h2>
+
+    <div id="step1">
+      <input id="l-email" type="email" placeholder="E-mail" value="jarlan.emanuel70@aluno.ifce.edu.br"/>
+      <button class="btn-primary" onclick="solicitarCodigo()">Enviar código 2FA</button>
+      <button class="link" onclick="mostrarCadastro()">Criar nova conta</button>
+    </div>
+
+    <div id="step2">
+      <input id="l-senha" type="password" placeholder="Senha" value="123456"/>
+      <input id="l-codigo" type="text" placeholder="Código recebido no e-mail" maxlength="6"/>
+      <button class="btn-success" onclick="fazerLogin()">Entrar</button>
+      <button class="link" onclick="voltarLogin()">← Voltar</button>
+    </div>
+
+    <div id="step-cadastro">
+      <input id="c-email" type="email" placeholder="E-mail"/>
+      <input id="c-senha" type="password" placeholder="Senha"/>
+      <button class="btn-success" onclick="cadastrar()">Criar conta</button>
+      <button class="link" onclick="voltarLogin()">← Voltar para login</button>
+    </div>
+
+    <p id="login-msg"></p>
+  </div>
+</div>
+
+<!-- ── App ── -->
+<header>
+  <h1>📚 PSW2 — Biblioteca de Livros</h1>
+  <span id="status-badge">desconectado</span>
+</header>
+
+<main>
+
+  <!-- Livros -->
+  <div class="card">
+    <h2>📖 Livros</h2>
+
+    <!-- Adicionar -->
+    <div class="form-row">
+      <input id="titulo" placeholder="Título" />
+      <input id="autor"  placeholder="Autor" />
+      <input id="ano"    placeholder="Ano" type="number" style="max-width:90px"/>
+      <input id="imagem" type="file" accept="image/*" style="max-width:180px"/>
+      <button class="btn-success" onclick="adicionarLivro()">+ Adicionar</button>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Capa</th>
+          <th>Título</th>
+          <th>Autor</th>
+          <th>Ano</th>
+          <th>Ações</th>
+        </tr>
+      </thead>
+      <tbody id="tabela-livros">
+        <tr><td colspan="5" style="color:#475569;text-align:center">Carregando...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Distância -->
+  <div class="card">
+    <h2>📍 Calcular Distância entre dois pontos</h2>
+    <div class="form-row">
+      <input id="lat1" placeholder="Lat 1" value="-23.55" />
+      <input id="lon1" placeholder="Lon 1" value="-46.63" />
+      <input id="lat2" placeholder="Lat 2" value="-22.91" />
+      <input id="lon2" placeholder="Lon 2" value="-43.17" />
+      <button class="btn-primary" onclick="calcularDistancia()">Calcular</button>
+    </div>
+    <div id="resultado-distancia"></div>
+  </div>
+
+</main>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- Modal editar -->
+<div id="modal-overlay" style="display:none;position:fixed;inset:0;background:#0008;z-index:50;align-items:center;justify-content:center;">
+  <div style="background:#1e293b;border:1px solid #334155;border-radius:12px;padding:28px;width:360px;">
+    <h2 style="color:#38bdf8;margin-bottom:16px;font-size:1rem;">✏️ Editar Livro</h2>
+    <input id="e-titulo" placeholder="Título"  style="width:100%;margin-bottom:8px;display:block"/>
+    <input id="e-autor"  placeholder="Autor"   style="width:100%;margin-bottom:8px;display:block"/>
+    <input id="e-ano"    placeholder="Ano" type="number" style="width:100%;margin-bottom:16px;display:block"/>
+    <div style="display:flex;gap:8px;">
+      <button class="btn-success" style="flex:1" onclick="salvarEdicao()">Salvar</button>
+      <button class="btn-danger"  style="flex:1" onclick="fecharModal()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const API = "http://localhost:3000";
+  let TOKEN = "";
+  let editandoId = "";
+
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+
+  function toast(msg, tipo = "ok") {
+    const el = document.getElementById("toast");
+    el.textContent = msg;
+    el.className = `show ${tipo}`;
+    setTimeout(() => el.className = "", 3000);
+  }
+
+  async function api(method, path, body, isForm = false) {
+    const opts = {
+      method,
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    };
+    if (body && !isForm) {
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify(body);
+    } else if (isForm) {
+      opts.body = body; // FormData
+    }
+    const res = await fetch(API + path, opts);
+    return res;
+  }
+
+  // ── Login / 2FA ───────────────────────────────────────────────────────────────
+
+  async function mostrarCadastro() {
+    document.getElementById("step1").style.display = "none";
+    document.getElementById("step-cadastro").style.display = "block";
+    document.getElementById("login-msg").textContent = "";
+  }
+
+  function voltarLogin() {
+    document.getElementById("step1").style.display = "block";
+    document.getElementById("step2").style.display = "none";
+    document.getElementById("step-cadastro").style.display = "none";
+    document.getElementById("login-msg").textContent = "";
+  }
+
+  async function cadastrar() {
+    const email = document.getElementById("c-email").value;
+    const senha = document.getElementById("c-senha").value;
+    if (!email || !senha) { document.getElementById("login-msg").textContent = "Preencha e-mail e senha."; return; }
+    const res = await fetch(`${API}/usuarios`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, senha }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      document.getElementById("login-msg").style.color = "#4ade80";
+      document.getElementById("login-msg").textContent = "Conta criada! Faça o login.";
+      document.getElementById("l-email").value = email;
+      voltarLogin();
+    } else {
+      document.getElementById("login-msg").style.color = "#f87171";
+      document.getElementById("login-msg").textContent = data.erro || "Erro ao criar conta.";
+    }
+  }
+
+  async function solicitarCodigo() {
+    const email = document.getElementById("l-email").value;
+    const res = await fetch(`${API}/logar/solicitar-codigo`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      document.getElementById("step1").style.display = "none";
+      document.getElementById("step2").style.display = "block";
+      document.getElementById("login-msg").style.color = "#4ade80";
+      document.getElementById("login-msg").textContent = "Código enviado! Verifique seu e-mail.";
+    } else {
+      document.getElementById("login-msg").textContent = data.erro || "Erro ao enviar código.";
+    }
+  }
+
+  async function fazerLogin() {
+    const email  = document.getElementById("l-email").value;
+    const senha  = document.getElementById("l-senha").value;
+    const codigo = document.getElementById("l-codigo").value;
+    const res = await fetch(`${API}/logar`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, senha, codigo }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      TOKEN = data.token;
+      document.getElementById("overlay").style.display = "none";
+      document.getElementById("status-badge").textContent = email;
+      document.getElementById("status-badge").className = "ok";
+      carregarLivros();
+    } else {
+      document.getElementById("login-msg").textContent = data.erro || "Erro no login.";
+    }
+  }
+
+  // ── Livros ────────────────────────────────────────────────────────────────────
+
+  async function carregarLivros() {
+    const res = await api("GET", "/livros");
+    const livros = await res.json();
+    const tbody = document.getElementById("tabela-livros");
+    if (!livros.length) {
+      tbody.innerHTML = `<tr><td colspan="5" style="color:#475569;text-align:center">Nenhum livro cadastrado.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = livros.map(l => `
+      <tr>
+        <td>${l.imagemUrl ? `<img class="capa" src="${l.imagemUrl}"/>` : "—"}</td>
+        <td>${l.titulo}</td>
+        <td>${l.autor}</td>
+        <td><span class="tag-ano">${l.ano}</span></td>
+        <td style="display:flex;gap:6px;">
+          <button class="btn-warning btn-sm" onclick="abrirModal('${l._id}','${l.titulo}','${l.autor}',${l.ano})">✏️</button>
+          <button class="btn-danger  btn-sm" onclick="deletarLivro('${l._id}')">🗑️</button>
+        </td>
+      </tr>
+    `).join("");
+  }
+
+  async function adicionarLivro() {
+    const titulo = document.getElementById("titulo").value;
+    const autor  = document.getElementById("autor").value;
+    const ano    = document.getElementById("ano").value;
+    const file   = document.getElementById("imagem").files[0];
+
+    if (!titulo || !autor || !ano) { toast("Preencha título, autor e ano.", "err"); return; }
+
+    const form = new FormData();
+    form.append("titulo", titulo);
+    form.append("autor",  autor);
+    form.append("ano",    ano);
+    if (file) form.append("imagem", file);
+
+    const res = await api("POST", "/livros", form, true);
+    if (res.ok) {
+      toast("Livro adicionado!");
+      ["titulo","autor","ano"].forEach(id => document.getElementById(id).value = "");
+      document.getElementById("imagem").value = "";
+      carregarLivros();
+    } else {
+      const d = await res.json();
+      toast(d.erro || "Erro ao adicionar.", "err");
+    }
+  }
+
+  async function deletarLivro(id) {
+    if (!confirm("Remover este livro?")) return;
+    const res = await api("DELETE", `/livros/${id}`);
+    if (res.ok) { toast("Livro removido!"); carregarLivros(); }
+    else toast("Erro ao remover.", "err");
+  }
+
+  // ── Modal editar ──────────────────────────────────────────────────────────────
+
+  function abrirModal(id, titulo, autor, ano) {
+    editandoId = id;
+    document.getElementById("e-titulo").value = titulo;
+    document.getElementById("e-autor").value  = autor;
+    document.getElementById("e-ano").value    = ano;
+    const m = document.getElementById("modal-overlay");
+    m.style.display = "flex";
+  }
+
+  function fecharModal() {
+    document.getElementById("modal-overlay").style.display = "none";
+  }
+
+  async function salvarEdicao() {
+    const body = {
+      titulo: document.getElementById("e-titulo").value,
+      autor:  document.getElementById("e-autor").value,
+      ano:    document.getElementById("e-ano").value,
+    };
+    const res = await api("PUT", `/livros/${editandoId}`, body);
+    if (res.ok) { toast("Livro atualizado!"); fecharModal(); carregarLivros(); }
+    else toast("Erro ao atualizar.", "err");
+  }
+
+  // ── Usuário ───────────────────────────────────────────────────────────────────
+
+  async function criarUsuario() {
+    const email = document.getElementById("u-email").value;
+    const senha = document.getElementById("u-senha").value;
+    if (!email || !senha) { toast("Preencha e-mail e senha.", "err"); return; }
+    const res = await fetch(`${API}/usuarios`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, senha }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      toast(`Usuário ${data.email} criado!`);
+      document.getElementById("u-email").value = "";
+      document.getElementById("u-senha").value = "";
+    } else {
+      toast(data.erro || "Erro ao criar usuário.", "err");
+    }
+  }
+
+  // ── Distância ─────────────────────────────────────────────────────────────────
+
+  async function calcularDistancia() {
+    const lat1 = document.getElementById("lat1").value;
+    const lon1 = document.getElementById("lon1").value;
+    const lat2 = document.getElementById("lat2").value;
+    const lon2 = document.getElementById("lon2").value;
+    const res  = await api("GET", `/distancia?lat1=${lat1}&lon1=${lon1}&lat2=${lat2}&lon2=${lon2}`);
+    const data = await res.json();
+    document.getElementById("resultado-distancia").textContent =
+      res.ok ? `📏 ${data.distanciaKm} km` : data.erro;
+  }
+</script>
+</body>
+</html>
