@@ -1,8 +1,11 @@
 {
   "version": 2,
-  "builds": [{ "src": "index.js", "use": "@vercel/node" }],
+  "builds": [
+    { "src": "index.js", "use": "@vercel/node" },
+    { "src": "public/**", "use": "@vercel/static" }
+  ],
   "routes": [
-    { "src": "/public/(.*)", "dest": "/public/$1" },
-    { "src": "/(.*)", "dest": "index.js" }
+    { "src": "/", "dest": "/public/index.html" },
+    { "src": "/(livros|logar|usuarios|distancia|logs)(.*)", "dest": "index.js" }
   ]
 }
