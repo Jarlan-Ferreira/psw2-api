@@ -15,20 +15,12 @@ const Livro   = require("./models/Livro");
 
 const app = express();
 
-// ── G. CORS — apenas mesmo servidor ──────────────────────────────────────────
-app.use(cors({
-  origin: (origin, cb) => {
-    // Permite requisições sem origin (ex: Postman local) e do mesmo servidor
-    if (!origin || origin === `http://localhost:${process.env.PORT || 3000}`) {
-      cb(null, true);
-    } else {
-      cb(new Error("CORS: origem não permitida"));
-    }
-  },
-}));
-
+app.use(cors());
 app.use(express.json());
-app.use(express.static(require("path").join(__dirname, "public")));
+
+const path = require("path");
+app.use(express.static(path.join(__dirname, "public")));
+app.get("/", (_req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
 
 const SECRET = process.env.JWT_SECRET || "psw2_secret_key";
 
