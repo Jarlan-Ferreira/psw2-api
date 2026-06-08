@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PSW2 - Demonstração</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body>
+    <h1>PSW2 API - Demonstração das Novas Funcionalidades</h1>
+    
+    <h2>A. Exportar CSV</h2>
+    <button onclick="exportarCSV()">Exportar Dados</button>
+    
+    <h2>C. Relatório de Monitoramento</h2>
+    <button onclick="relatorioMonitoramento()">Baixar Relatório PDF</button>
+    
+    <h2>D. Stream de Vídeo</h2>
+    <button onclick="iniciarStream()">Iniciar Stream</button>
+    <div id="stream-output"></div>
+
+    <h2>🎬 Trailer do Livro</h2>
+    <div style="display:flex;gap:8px;align-items:center;">
+        <input id="trailer-titulo" type="text" placeholder="ID do livro" style="padding:6px;width:260px;" />
+        <button onclick="buscarTrailer()">Buscar Trailer</button>
+    </div>
+    <div id="trailer-info" style="margin-top:12px;"></div>
+    <div id="trailer-player" style="margin-top:8px;"></div>
+    
+    <h2>F. Sensor em Tempo Real</h2>
+    <div id="sensor-data">
+        <p>Temperatura: <span id="temp">--</span>°C</p>
+        <p>Umidade: <span id="umidade">--%</span></p>
+        <p>Última atualização: <span id="timestamp">--</span></p>
+    </div>
+
+    <script>
+        // E. Socket.io - Conexão
+        const socket = io();
+        
+        socket.on('sensor-update', (data) => {
+            document.getElementById('temp').textContent = data.temperatura;
+            document.getElementById('umidade').textContent = data.umidade;
+            document.getElementById('timestamp').textContent = new Date(data.timestamp).toLocaleTimeString();
+        });
+
+        function exportarCSV() {
+            const token = prompt('Token JWT:');
+            if (!token) return;
+            
+            window.open(`/exportar-csv`, '_blank');
+        }
+
+        function relatorioMonitoramento() {
+            const token = prompt('Token JWT:');
+            if (!token) return;
+            
+            window.open(`/relatorio-monitoramento`, '_blank');
+        }
+
+        function iniciarStream() {
+            fetch('/video-stream')
+                .then(response => response.text())
+                .then(data => {
+                    document.getElementById('stream-output').innerHTML = `<pre>${data}</pre>`;
+                });
+        }
+
+        const BYPASS_EMAIL = 'jarlan.emanuel70@aluno.ifce.edu.br';
+
+        async function buscarTrailer() {
+            const id = document.getElementById('trailer-titulo').value.trim();
+            if (!id) return alert('Informe o ID do livro.');
+
+            const headers = {};
+            const emailSalvo = localStorage.getItem('bypass_email');
+
+            if (emailSalvo === BYPASS_EMAIL) {
+                headers['x-bypass-email'] = BYPASS_EMAIL;
+            } else {
+                const email = prompt('Seu e-mail:');
+                if (email === BYPASS_EMAIL) {
+                    localStorage.setItem('bypass_email', BYPASS_EMAIL);
+                    headers['x-bypass-email'] = BYPASS_EMAIL;
+                } else {
+                    const token = prompt('Token JWT:');
+                    if (!token) return;
+                    headers['Authorization'] = `Bearer ${token}`;
+                }
+            }
+
+            const res = await fetch(`/livros/${id}/trailer`, { headers });
+            const data = await res.json();
+
+            if (!res.ok) {
+                document.getElementById('trailer-info').innerHTML = `<p style="color:red">${data.erro}</p>`;
+                document.getElementById('trailer-player').innerHTML = '';
+                return;
+            }
+
+            document.getElementById('trailer-info').innerHTML = `
+                <p><strong>${data.filme}</strong> (${data.ano})</p>
+                ${data.poster ? `<img src="${data.poster}" height="200" style="border-radius:6px;">` : ''}
+            `;
+            document.getElementById('trailer-player').innerHTML = `
+                <iframe width="560" height="315" src="${data.embed}"
+                    frameborder="0" allowfullscreen style="border-radius:6px;"></iframe>
+            `;
+        }
+    </script>
+</body>
+</html>

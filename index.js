@@ -9,11 +9,18 @@ const cloudinary = require("cloudinary").v2;
 const multer     = require("multer");
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
 const PDFDocument = require("pdfkit");
+const cron        = require("node-cron");
+const fs          = require("fs");
+const http        = require("http");
+const { Server }  = require("socket.io");
 
 const Usuario = require("./models/Usuario");
 const Livro   = require("./models/Livro");
+const Backup  = require("./models/Backup");
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
 
 app.use(cors());
 app.use(express.json());
@@ -52,11 +59,27 @@ const transporter = nodemailer.createTransport({
 
 // ── Logs em memória ───────────────────────────────────────────────────────────
 const logs = [];
+let acessosPorRota = {};
+
+// ── Sensor virtual ────────────────────────────────────────────────────────────
+let sensorData = { temperatura: 25, umidade: 60, timestamp: new Date() };
+
+// Simula sensor virtual
+setInterval(() => {
+  sensorData = {
+    temperatura: (20 + Math.random() * 15).toFixed(1),
+    umidade: (40 + Math.random() * 40).toFixed(0),
+    timestamp: new Date()
+  };
+  io.emit('sensor-update', sensorData);
+}, 2000);
 
 // ── Middlewares globais ───────────────────────────────────────────────────────
 
 app.use((req, _res, next) => {
-  logs.push({ horario: new Date().toISOString(), rota: `${req.method} ${req.path}` });
+  const rota = `${req.method} ${req.path}`;
+  logs.push({ horario: new Date().toISOString(), rota });
+  acessosPorRota[rota] = (acessosPorRota[rota] || 0) + 1;
   next();
 });
 
@@ -200,7 +223,115 @@ app.get("/distancia", autenticar, (req, res) => {
   res.json({ distanciaKm: distancia.toFixed(2) });
 });
 
-// ── Logs ──────────────────────────────────────────────────────────────────────
+// ── A. Exportar dados em CSV ──────────────────────────────────────────────────
+app.get("/exportar-csv", autenticar, async (_req, res) => {
+  const [livros, usuarios] = await Promise.all([Livro.find(), Usuario.find().select('-senha -codigo2fa')]);
+  let csv = "LIVROS\nTítulo;Autor;Ano;URL Imagem\n";
+  livros.forEach(l => csv += `${l.titulo};${l.autor};${l.ano};${l.imagemUrl || ''}\n`);
+  csv += "\nUSUÁRIOS\nEmail\n";
+  usuarios.forEach(u => csv += `${u.email}\n`);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename=dados.csv');
+  res.send(csv);
+});
+
+// ── B. Backup automático diário (17:00) ───────────────────────────────────────
+async function gerarBackup() {
+  const [livros, usuarios] = await Promise.all([Livro.find(), Usuario.find().select('-senha -codigo2fa')]);
+  let csv = "BACKUP - " + new Date().toISOString() + "\n\nLIVROS\nTitulo;Autor;Ano;URL Imagem\n";
+  livros.forEach(l => csv += `${l.titulo};${l.autor};${l.ano};${l.imagemUrl || ''}\n`);
+  csv += "\nUSUARIOS\nEmail\n";
+  usuarios.forEach(u => csv += `${u.email}\n`);
+  const backup = await Backup.create({ conteudo: csv });
+  return backup.criadoEm.toISOString();
+}
+
+cron.schedule('0 17 * * *', async () => {
+  try {
+    await gerarBackup();
+    console.log('Backup automatico salvo no MongoDB');
+  } catch (e) {
+    console.error('Erro no backup:', e.message);
+  }
+});
+
+app.post("/backup-manual", autenticar, async (_req, res) => {
+  try {
+    const timestamp = await gerarBackup();
+    res.json({ mensagem: `Backup criado em ${timestamp}` });
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+});
+
+// ── C. Relatório de monitoramento (PDF) ───────────────────────────────────────
+app.get("/relatorio-monitoramento", autenticar, (_req, res) => {
+  const agora = new Date();
+  const mesAtual = agora.getMonth();
+  const anoAtual = agora.getFullYear();
+  
+  const logsDoMes = logs.filter(l => {
+    const data = new Date(l.horario);
+    return data.getMonth() === mesAtual && data.getFullYear() === anoAtual;
+  });
+  
+  const acessosPorHora = {};
+  logsDoMes.forEach(l => {
+    const hora = new Date(l.horario).getHours();
+    acessosPorHora[hora] = (acessosPorHora[hora] || 0) + 1;
+  });
+  
+  const horarioPico = Object.keys(acessosPorHora).reduce((a, b) => 
+    acessosPorHora[a] > acessosPorHora[b] ? a : b, '0');
+  
+  const doc = new PDFDocument({ margin: 40 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'attachment; filename=monitoramento.pdf');
+  doc.pipe(res);
+  
+  doc.fontSize(18).text('Relatório de Monitoramento', { align: 'center' }).moveDown();
+  doc.fontSize(12).text(`Mês: ${mesAtual + 1}/${anoAtual}`).moveDown();
+  doc.text(`Horário de pico: ${horarioPico}:00 (${acessosPorHora[horarioPico] || 0} acessos)`).moveDown();
+  doc.text('Acessos por rota:').moveDown();
+  
+  Object.entries(acessosPorRota).forEach(([rota, count]) => {
+    doc.text(`${rota}: ${count} acessos`);
+  });
+  
+  doc.end();
+});
+
+// ── D. YouTube Search ─────────────────────────────────────────────────────────
+app.get("/yt-search", autenticar, async (req, res) => {
+  const { q } = req.query;
+  if (!q) return res.status(400).json({ erro: "Informe o parametro 'q'." });
+  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=8&q=${encodeURIComponent(q)}&key=${process.env.YOUTUBE_API_KEY}`;
+  const data = await fetch(url).then(r => r.json());
+  if (data.error) return res.status(500).json({ erro: data.error.message });
+  res.json(data.items.map(i => ({
+    id:    i.id.videoId,
+    titulo: i.snippet.title,
+    canal:  i.snippet.channelTitle,
+    thumb:  i.snippet.thumbnails.medium.url,
+  })));
+});
+
+// ── E. Socket.io ──────────────────────────────────────────────────────────────
+io.on('connection', (socket) => {
+  console.log('Cliente conectado:', socket.id);
+  
+  // Envia dados atuais do sensor
+  socket.emit('sensor-update', sensorData);
+  
+  socket.on('disconnect', () => {
+    console.log('Cliente desconectado:', socket.id);
+  });
+});
+
+// ── F. Dados do sensor em tempo real ──────────────────────────────────────────
+app.get("/sensor", (_req, res) => {
+  res.json(sensorData);
+});
 app.get("/logs", autenticar, (req, res) => {
   const { data } = req.query;
   if (!data) return res.status(400).json({ erro: "Informe o parâmetro 'data' (YYYY-MM-DD)." });
@@ -224,7 +355,16 @@ app.get("/livros/relatorio/pdf", autenticar, async (_req, res) => {
 // ── Iniciar ───────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 if (require.main === module) {
-  app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+  // Cria diretório de backups se não existir
+  if (!fs.existsSync('./backups')) {
+    fs.mkdirSync('./backups');
+  }
+  
+  server.listen(PORT, () => {
+    console.log(`Servidor rodando na porta ${PORT}`);
+    console.log('Socket.io ativo para dados em tempo real');
+    console.log('Backup automático configurado para 17:00 diárias');
+  });
 }
 
 module.exports = app;
