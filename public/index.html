@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>PSW2 API — Biblioteca</title>
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -378,12 +377,27 @@
   let TOKEN = "";
   let editandoId = "";
 
-  const socket = io();
-  socket.on('sensor-update', (data) => {
-    document.getElementById('temp').textContent = data.temperatura;
-    document.getElementById('umidade').textContent = data.umidade;
-    document.getElementById('ts').textContent = new Date(data.timestamp).toLocaleTimeString();
-  });
+  const socket = typeof io !== 'undefined' ? io() : null;
+  if (socket) {
+    socket.on('sensor-update', (data) => {
+      document.getElementById('temp').textContent = data.temperatura;
+      document.getElementById('umidade').textContent = data.umidade;
+      document.getElementById('ts').textContent = new Date(data.timestamp).toLocaleTimeString();
+    });
+  } else {
+    // Polling para ambientes serverless (Vercel)
+    async function pollSensor() {
+      try {
+        const res = await fetch('/sensor');
+        const data = await res.json();
+        document.getElementById('temp').textContent = data.temperatura;
+        document.getElementById('umidade').textContent = data.umidade;
+        document.getElementById('ts').textContent = new Date(data.timestamp).toLocaleTimeString();
+      } catch {}
+    }
+    pollSensor();
+    setInterval(pollSensor, 2000);
+  }
 
   function trocarAba(nome, btn) {
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
