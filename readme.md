@@ -1,6 +1,12 @@
 # PSW2 API v2 — Biblioteca de Livros
 
-API REST desenvolvida para a atividade N2B da disciplina PSW2.
+API REST desenvolvida para a atividade N2 da disciplina PSW2.
+
+**Professor:** Harley Macêdo de Mello  
+**Aluno:** Jarlan Emanuel  
+**Entrega:** 09/06/2026
+
+---
 
 ## Instalação
 
@@ -8,7 +14,7 @@ API REST desenvolvida para a atividade N2B da disciplina PSW2.
 npm install
 ```
 
-Copie `.env` e preencha as variáveis:
+Configure o `.env`:
 
 ```env
 MONGO_URI=mongodb+srv://<usuario>:<senha>@cluster.mongodb.net/psw2db
@@ -18,6 +24,7 @@ CLOUDINARY_API_KEY=<api_key>
 CLOUDINARY_API_SECRET=<api_secret>
 EMAIL_USER=<seu_email>@gmail.com
 EMAIL_PASS=<app_password_gmail>
+YOUTUBE_API_KEY=<chave_youtube>
 PORT=3000
 ```
 
@@ -25,15 +32,77 @@ PORT=3000
 npm start
 ```
 
-## Testes
+---
 
-```bash
-npm test
+## Funcionalidades da Atividade N2
+
+### A — Exportar CSV
+Botão **"Exportar CSV"** na aba Exportar que baixa todos os livros e usuários do banco em formato `.csv`.
+
 ```
+GET /exportar-csv
+Authorization: Bearer <token>
+```
+
+---
+
+### B — Backup Automático às 17:00
+Função agendada com `node-cron` que roda todos os dias às 17:00 e salva um snapshot CSV no **MongoDB Atlas** (collection `backups`).
+
+Também disponível manualmente:
+
+```
+POST /backup-manual
+Authorization: Bearer <token>
+```
+
+---
+
+### C — Relatório de Monitoramento (PDF)
+Botão **"Relatório de Monitoramento"** que gera e baixa um PDF contendo:
+- Número de acessos por rota no mês atual
+- Horário de pico de uso do sistema
+
+```
+GET /relatorio-monitoramento
+Authorization: Bearer <token>
+```
+
+---
+
+### D — Stream de Vídeo (YouTube)
+Aba **"Stream"** com campo de busca integrado à **YouTube Data API v3**.  
+Digita o nome de um vídeo, lista os resultados com thumbnail e canal, clica para reproduzir o player embed direto na página.
+
+```
+GET /yt-search?q=<termo>
+Authorization: Bearer <token>
+```
+
+---
+
+### E — Socket.io
+Conexão WebSocket via **Socket.io** que emite o evento `sensor-update` a cada 2 segundos para todos os clientes conectados com os dados do sensor virtual.
+
+Em ambientes serverless (Vercel), o front usa **polling** automático como fallback, chamando `GET /sensor` a cada 2 segundos.
+
+---
+
+### F — Sensor Virtual em Tempo Real
+Aba **"Sensor"** exibindo temperatura e umidade atualizados em tempo real.  
+Sensor virtual simula leituras aleatórias no intervalo de:
+- Temperatura: 20°C a 35°C
+- Umidade: 40% a 80%
+
+```
+GET /sensor
+```
+
+---
 
 ## Autenticação (2FA)
 
-O login é feito em **dois passos**:
+O login é feito em dois passos:
 
 **1. Solicitar código:**
 ```
@@ -41,87 +110,57 @@ POST /logar/solicitar-codigo
 { "email": "admin@email.com" }
 ```
 
-**2. Fazer login com o código recebido por e-mail:**
+**2. Login com código recebido por e-mail:**
 ```
 POST /logar
 { "email": "admin@email.com", "senha": "123456", "codigo": "123456" }
 ```
-Retorna um `token` JWT válido por 8h.
 
-Todas as demais rotas exigem o header:
+Retorna um `token` JWT válido por 8h. Todas as rotas protegidas exigem:
 ```
 Authorization: Bearer <token>
 ```
+
+---
 
 ## Rotas
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
 | POST | `/logar/solicitar-codigo` | Envia código 2FA por e-mail |
-| POST | `/logar` | Autentica com senha + código 2FA e retorna JWT |
+| POST | `/logar` | Autentica e retorna JWT |
 | GET | `/livros` | Lista todos os livros |
-| POST | `/livros` | Insere livro (suporta upload de imagem) |
-| PUT | `/livros/:id` | Atualiza dados de um livro |
-| DELETE | `/livros/:id` | Remove um livro pelo ID |
-| GET | `/livros/:id` | Busca um livro pelo ID |
-| GET | `/livros/relatorio/pdf` | Baixa PDF com lista de livros |
-| GET | `/logs?data=YYYY-MM-DD` | Retorna logs de uma data |
-| GET | `/distancia?lat1=&lon1=&lat2=&lon2=` | Calcula distância entre dois pontos (km) |
+| POST | `/livros` | Insere livro com upload de imagem |
+| PUT | `/livros/:id` | Atualiza livro |
+| DELETE | `/livros/:id` | Remove livro |
+| GET | `/livros/:id` | Busca livro por ID |
+| GET | `/livros/relatorio/pdf` | PDF com lista de livros |
+| GET | `/exportar-csv` | Exporta dados em CSV |
+| POST | `/backup-manual` | Gera backup manual no MongoDB |
+| GET | `/relatorio-monitoramento` | PDF de monitoramento |
+| GET | `/yt-search?q=` | Busca vídeos no YouTube |
+| GET | `/sensor` | Dados atuais do sensor virtual |
+| GET | `/logs?data=YYYY-MM-DD` | Logs de uma data |
+| GET | `/distancia?lat1=&lon1=&lat2=&lon2=` | Calcula distância (km) |
 
-### Inserir livro (com imagem)
-
-```
-POST /livros
-Content-Type: multipart/form-data
-
-titulo: Refactoring
-autor: Martin Fowler
-ano: 1999
-imagem: <arquivo .jpg/.png>
-```
-
-### Atualizar livro
-
-```json
-PUT /livros/<id>
-{
-  "titulo": "Novo Título",
-  "autor": "Novo Autor",
-  "ano": 2024
-}
-```
-
-### Calcular distância
-
-```
-GET /distancia?lat1=-23.55&lon1=-46.63&lat2=-22.91&lon2=-43.17
-```
-```json
-{ "distanciaKm": "357.42" }
-```
-
-## Middlewares
-
-| Middleware | Descrição |
-|-----------|-----------|
-| CORS | Permite apenas requisições do mesmo servidor |
-| Dias úteis | Bloqueia requisições aos sábados e domingos (403) |
-| Logger | Registra horário e rota de cada requisição em memória |
-| JWT | Protege todas as rotas exceto `/logar` e `/logar/solicitar-codigo` |
+---
 
 ## Segurança
 
-- Senhas armazenadas com **bcrypt** (salt 10)
+- Senhas com **bcrypt** (salt 10)
 - **JWT** com expiração de 8h
 - **2FA por e-mail** obrigatório no login
-- **CORS** restrito ao mesmo servidor
+- **CORS** ativo
 
-## Armazenamento em nuvem
+## Armazenamento em Nuvem
 
-- **MongoDB Atlas** — dados dos livros e usuários
+- **MongoDB Atlas** — livros, usuários e backups
 - **Cloudinary** — imagens dos livros
+- **YouTube Data API v3** — busca e stream de vídeos
 
-## Deploy — Vercel
+## Deploy
+
+Hospedado no **Vercel** com variáveis de ambiente configuradas no painel.
 
 ```bash
 npm i -g vercel
